@@ -34,7 +34,7 @@ function ComposeContent() {
   const [recipientsText, setRecipientsText] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState(10);
   const [scheduledDate, setScheduledDate] = useState("");
-  const [scheduledClock, setScheduledClock] = useState("");
+  const [scheduledClock, setScheduledClock] = useState("09:45");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [excluded, setExcluded] = useState(0);
@@ -107,7 +107,7 @@ function ComposeContent() {
     setRecipientsText("");
     setIntervalSeconds(10);
     setScheduledDate("");
-    setScheduledClock("");
+    setScheduledClock("09:45");
     setAttachment(null);
     setAttachmentInputKey((key) => key + 1);
     editor?.commands.setContent("<p></p>");
