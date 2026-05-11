@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: Params) {
       parentBatchId: source.batchId,
       type: "retry",
     },
-    "sending",
+    "scheduled",
   );
   runBatch(batch.batchId, Number(intervalSeconds)).catch(console.error);
   return NextResponse.json({ batchId: batch.batchId });

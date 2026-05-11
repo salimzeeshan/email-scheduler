@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createBatch, runBatch, saveTempAttachment } from "@/lib/batch";
-import { hasMeaningfulHtml, htmlToText } from "@/lib/utils";
+import { hasMeaningfulHtml, htmlToText, parseRecipients } from "@/lib/utils";
 
 export async function POST(request: Request) {
   const form = await request.formData();
@@ -8,10 +8,11 @@ export async function POST(request: Request) {
   const bodyHtml = String(form.get("bodyHtml") || "");
   const fromName = String(form.get("fromName") || process.env.FROM_NAME || "");
   const recipients = String(form.get("recipients") || "").split(/\r?\n/);
+  const parsedRecipients = parseRecipients(recipients.join("\n"));
   const intervalSeconds = Number(form.get("intervalSeconds") || 10);
   const attachmentFile = form.get("attachment") as File | null;
 
-  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml) || !attachmentFile || attachmentFile.size === 0 || recipients.length === 0) {
+  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml) || !attachmentFile || attachmentFile.size === 0 || parsedRecipients.valid.length === 0) {
     return NextResponse.json({ error: "Subject, content, attachment, and recipients are required" }, { status: 400 });
   }
 
@@ -23,12 +24,12 @@ export async function POST(request: Request) {
       fromName,
       bodyHtml,
       bodyText: htmlToText(bodyHtml),
-      recipients,
+      recipients: parsedRecipients.valid,
       intervalSeconds,
       ...attachment,
       type: "instant",
     },
-    "sending",
+    "scheduled",
   );
 
   runBatch(batch.batchId, intervalSeconds).catch(console.error);
