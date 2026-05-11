@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { BarChart3, Ban, Edit3, MailCheck, Settings, StickyNote } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,10 +19,10 @@ const nav = [
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
         <div className="flex min-h-screen">
-          <aside className="hidden w-64 border-r bg-white lg:block">
+          <aside className="hidden w-64 border-r bg-card lg:block">
             <div className="flex h-16 items-center gap-2 border-b px-5">
               <MailCheck className="h-5 w-5" />
               <span className="font-semibold">Campaign Manager</span>
@@ -38,6 +39,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 </Link>
               ))}
             </nav>
+            <div className="border-t p-3">
+              <ThemeToggle />
+            </div>
           </aside>
           <main className="min-w-0 flex-1">{children}</main>
         </div>

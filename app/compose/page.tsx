@@ -36,8 +36,10 @@ function ComposeContent() {
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledClock, setScheduledClock] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [excluded, setExcluded] = useState(0);
   const [message, setMessage] = useState("");
+  const [busyAction, setBusyAction] = useState<"template" | "test" | "send" | "schedule" | null>(null);
 
   const editor = useEditor({
     extensions: [StarterKit, Underline, Link.configure({ openOnClick: false })],
@@ -46,6 +48,7 @@ function ComposeContent() {
   });
 
   const parsed = useMemo(() => parseRecipients(recipientsText), [recipientsText]);
+  const duplicateCount = useMemo(() => countDuplicateRecipients(recipientsText), [recipientsText]);
   const firstRecipient = parsed.valid[0] || "alex@example.com";
   const previewHtml = renderPersonalizedBody(editor?.getHTML() || "", firstRecipient);
   const hasContent = (editor?.getText() || "").trim().length > 0;
@@ -97,10 +100,30 @@ function ComposeContent() {
     return form;
   }
 
-  async function action(url: string, extra?: Record<string, string>) {
+  function clearCampaignForm() {
+    setTemplateName("");
+    setSubject("");
+    setFromName("");
+    setRecipientsText("");
+    setIntervalSeconds(10);
+    setScheduledDate("");
+    setScheduledClock("");
+    setAttachment(null);
+    setAttachmentInputKey((key) => key + 1);
+    editor?.commands.setContent("<p></p>");
+  }
+
+  function filterRecipientList(value = recipientsText) {
+    setRecipientsText(cleanRecipientText(value));
+  }
+
+  async function action(actionName: "test" | "send" | "schedule", url: string, extra?: Record<string, string>) {
+    if (busyAction) return;
+    const requiresRecipients = actionName !== "test";
     const missing = [
       !subject.trim() ? "subject line" : "",
       !hasContent ? "content" : "",
+      requiresRecipients && parsed.valid.length === 0 ? "recipient" : "",
       !attachment ? "attachment" : "",
       url === "/api/schedule" && !scheduledDate ? "schedule date" : "",
       url === "/api/schedule" && !scheduledClock ? "schedule time" : "",
@@ -110,13 +133,24 @@ function ComposeContent() {
       setMessage(`${formatMissingFields(missing)} ${missing.length === 1 ? "is" : "are"} required.`);
       return;
     }
+    setBusyAction(actionName);
     setMessage("Working...");
-    const res = await fetch(url, { method: "POST", body: appendForm(extra) });
-    const json = await res.json().catch(() => ({}));
-    setMessage(res.ok ? `Done. ${json.batchId ? `Batch ${json.batchId}` : ""}` : json.error || "Request failed");
+    try {
+      const res = await fetch(url, { method: "POST", body: appendForm(extra) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(json.error || "Request failed");
+        return;
+      }
+      setMessage(`Done. ${json.batchId ? `Batch ${json.batchId}` : ""}`);
+      if (actionName === "send" || actionName === "schedule") clearCampaignForm();
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   async function saveTemplate() {
+    if (busyAction) return;
     if (!templateName) {
       setMessage("Add a template name first.");
       return;
@@ -125,12 +159,17 @@ function ComposeContent() {
       setMessage("Subject line and content are required to save a template.");
       return;
     }
-    await fetch("/api/templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: templateName, subject, fromName, bodyHtml: editor?.getHTML() || "" }),
-    });
-    setMessage("Template saved.");
+    setBusyAction("template");
+    try {
+      await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: templateName, subject, fromName, bodyHtml: editor?.getHTML() || "" }),
+      });
+      setMessage("Template saved.");
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   function setLink() {
@@ -154,7 +193,7 @@ function ComposeContent() {
                   <p className="mt-1 text-xs text-muted-foreground">First greeting: Hey {greetingName(firstRecipient)},</p>
                 </Field>
               </div>
-              <div className="rounded-md border bg-white">
+              <div className="rounded-md border bg-card">
                 <div className="flex flex-wrap gap-1 border-b p-2">
                   <Button type="button" size="icon" variant="ghost" onClick={() => editor?.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></Button>
                   <Button type="button" size="icon" variant="ghost" onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></Button>
@@ -171,15 +210,21 @@ function ComposeContent() {
           <Card>
             <CardHeader><CardTitle>Recipients and delivery</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <Field label="Recipient list">
-                <Textarea value={recipientsText} onChange={(e) => setRecipientsText(e.target.value)} placeholder="one email per line" />
+              <Field label="Recipient list *">
+                <Textarea
+                  required
+                  value={recipientsText}
+                  onBlur={() => filterRecipientList()}
+                  onChange={(e) => setRecipientsText(e.target.value)}
+                  placeholder="one email per line"
+                />
                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                  <span>{parsed.valid.length} valid</span><span>{parsed.invalid.length} invalid</span><span>{excluded} excluded by blocklist</span>
+                  <span>{parsed.valid.length} valid</span><span>{parsed.invalid.length} invalid</span><span>{duplicateCount} duplicate</span><span>{excluded} excluded by blocklist</span>
                 </div>
               </Field>
               <div className="grid gap-4 md:grid-cols-3">
-                <Field label=".txt upload"><Input type="file" accept=".txt" onChange={async (e) => setRecipientsText(`${recipientsText}\n${await e.target.files?.[0]?.text()}`)} /></Field>
-                <Field label="Attachment *"><Input required type="file" accept=".pdf,.docx" onChange={(e) => setAttachment(e.target.files?.[0] || null)} /></Field>
+                <Field label=".txt upload"><Input type="file" accept=".txt" onChange={async (e) => filterRecipientList(`${recipientsText}\n${await e.target.files?.[0]?.text()}`)} /></Field>
+                <Field label="Attachment *"><Input key={attachmentInputKey} required type="file" accept=".pdf,.docx" onChange={(e) => setAttachment(e.target.files?.[0] || null)} /></Field>
                 <Field label="Send interval"><Input type="number" min={0} value={intervalSeconds} onChange={(e) => setIntervalSeconds(Number(e.target.value))} /></Field>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -187,10 +232,10 @@ function ComposeContent() {
                 <Field label="Schedule time"><Input type="time" value={scheduledClock} onChange={(e) => setScheduledClock(e.target.value)} /></Field>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="secondary" onClick={saveTemplate}>Save template</Button>
-                <Button type="button" variant="outline" onClick={() => action("/api/test-email")}>Send test email</Button>
-                <Button type="button" onClick={() => action("/api/send")}>Send now</Button>
-                <Button type="button" variant="outline" onClick={() => action("/api/schedule", { scheduledTime: formatScheduleDateTime(scheduledDate, scheduledClock) })}>Schedule</Button>
+                <Button type="button" variant="secondary" disabled={busyAction !== null} onClick={saveTemplate}>{busyAction === "template" ? "Saving..." : "Save template"}</Button>
+                <Button type="button" variant="outline" disabled={busyAction !== null} onClick={() => action("test", "/api/test-email")}>{busyAction === "test" ? "Sending..." : "Send test email"}</Button>
+                <Button type="button" disabled={busyAction !== null} onClick={() => action("send", "/api/send")}>{busyAction === "send" ? "Sending..." : "Send now"}</Button>
+                <Button type="button" variant="outline" disabled={busyAction !== null} onClick={() => action("schedule", "/api/schedule", { scheduledTime: formatScheduleDateTime(scheduledDate, scheduledClock) })}>{busyAction === "schedule" ? "Scheduling..." : "Schedule"}</Button>
               </div>
               {!hasContent ? <p className="text-xs text-muted-foreground">Email content is required.</p> : null}
               {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
@@ -201,7 +246,7 @@ function ComposeContent() {
         <Card className="h-fit">
           <CardHeader><CardTitle>Live preview</CardTitle></CardHeader>
           <CardContent>
-            <div className="rounded-md border bg-white p-4">
+            <div className="rounded-md border bg-card p-4">
               <p className="mb-3 text-sm font-semibold">{subject || "Subject line"}</p>
               <div className="preview-body text-sm" dangerouslySetInnerHTML={{ __html: previewHtml }} />
             </div>
@@ -225,11 +270,33 @@ function capitalize(value: string) {
 function formatScheduleDateTime(date: string, time: string) {
   if (!date || !time) return "";
   const [year, month, day] = date.split("-");
-  const [hourValue, minute] = time.split(":");
-  const hour = Number(hourValue);
-  const meridiem = hour >= 12 ? "PM" : "AM";
-  const twelveHour = hour % 12 || 12;
-  return `${day}/${month}/${year} ${String(twelveHour).padStart(2, "0")}:${minute} ${meridiem}`;
+  const [hour, minute] = time.split(":");
+  return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)).toISOString();
+}
+
+function cleanRecipientText(value: string) {
+  const parsed = parseRecipients(value);
+  const invalid = Array.from(new Set(parsed.invalid));
+  return [...parsed.valid, ...invalid].join("\n");
+}
+
+function countDuplicateRecipients(value: string) {
+  const seen = new Set<string>();
+  let duplicates = 0;
+
+  value
+    .split(/\r?\n|,|;/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+    .forEach((email) => {
+      if (seen.has(email)) {
+        duplicates += 1;
+        return;
+      }
+      seen.add(email);
+    });
+
+  return duplicates;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
