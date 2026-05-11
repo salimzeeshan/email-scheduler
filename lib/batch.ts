@@ -76,16 +76,21 @@ export async function createBatch(payload: BatchPayload, status: "scheduled" | "
 
 export async function runBatch(batchId: string, intervalSeconds = 10) {
   await connectDb();
-  const batch = await Batch.findOne({ batchId });
+  const batch = await Batch.findOneAndUpdate({ batchId, status: "scheduled" }, { status: "sending" }, { new: true });
   if (!batch || batch.status === "cancelled") return null;
-
-  batch.status = "sending";
-  await batch.save();
 
   let sentCount = 0;
   let failedCount = 0;
+  const sentEmails = new Set(
+    batch.logs
+      .filter((log: { email: string; status: string }) => log.status === "sent")
+      .map((log: { email: string }) => normalizeEmail(log.email)),
+  );
 
   for (const email of batch.recipients as string[]) {
+    const normalizedEmail = normalizeEmail(email);
+    if (sentEmails.has(normalizedEmail)) continue;
+
     if ((await Batch.findOne({ batchId }).select("status").lean<{ status: string }>())?.status === "cancelled") break;
     try {
       await sendEmail({
@@ -97,6 +102,7 @@ export async function runBatch(batchId: string, intervalSeconds = 10) {
         attachment: batch.attachmentPath ? { name: batch.attachmentName || "attachment", path: batch.attachmentPath } : null,
       });
       sentCount += 1;
+      sentEmails.add(normalizedEmail);
       batch.logs.push({ email, status: "sent", timestamp: new Date() });
     } catch (error) {
       failedCount += 1;
