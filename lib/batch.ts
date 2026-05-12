@@ -17,6 +17,7 @@ export type BatchPayload = {
   intervalSeconds?: number;
   attachmentName?: string;
   attachmentPath?: string;
+  attachmentContent?: Buffer;
   scheduledTime?: Date;
   parentBatchId?: string;
   type?: "instant" | "scheduled" | "retry";
@@ -29,8 +30,9 @@ export async function saveTempAttachment(file: File | null) {
   const dir = path.join(os.tmpdir(), "email-scheduler");
   await fs.mkdir(dir, { recursive: true });
   const attachmentPath = path.join(dir, `${randomUUID()}-${file.name.replace(/[^a-zA-Z0-9_.-]/g, "_")}`);
-  await fs.writeFile(attachmentPath, Buffer.from(await file.arrayBuffer()));
-  return { attachmentName: file.name, attachmentPath };
+  const attachmentContent = Buffer.from(await file.arrayBuffer());
+  await fs.writeFile(attachmentPath, attachmentContent);
+  return { attachmentName: file.name, attachmentPath, attachmentContent };
 }
 
 export async function filterRecipients(rawRecipients: string[]) {
@@ -57,6 +59,7 @@ export async function createBatch(payload: BatchPayload, status: "scheduled" | "
     bodyText: payload.bodyText || htmlToText(payload.bodyHtml),
     attachmentName: payload.attachmentName,
     attachmentPath: payload.attachmentPath,
+    attachmentContent: payload.attachmentContent,
     recipientCount: filtered.recipients.length,
     skippedCount: filtered.skipped.length,
     status,
@@ -99,7 +102,13 @@ export async function runBatch(batchId: string, intervalSeconds = 10) {
         fromName: batch.fromName,
         bodyHtml: renderPersonalizedBody(batch.bodyHtml, email),
         bodyText: `Hey ${greetingName(email)},\n\n${batch.bodyText}`,
-        attachment: batch.attachmentPath ? { name: batch.attachmentName || "attachment", path: batch.attachmentPath } : null,
+        attachment: batch.attachmentName
+          ? {
+              name: batch.attachmentName,
+              content: batch.attachmentContent,
+              path: batch.attachmentPath,
+            }
+          : null,
       });
       sentCount += 1;
       sentEmails.add(normalizedEmail);
@@ -127,6 +136,7 @@ export async function runBatch(batchId: string, intervalSeconds = 10) {
   batch.failedCount = failedCount;
   batch.status = failedCount > 0 && sentCount === 0 ? "failed" : "completed";
   batch.completedAt = new Date();
+  batch.attachmentContent = undefined;
   await batch.save();
 
   await sendBatchSummaryEmail({ to: process.env.LOG_EMAIL, batch: batch.toObject() });

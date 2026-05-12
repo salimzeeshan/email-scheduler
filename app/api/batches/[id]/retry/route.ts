@@ -23,6 +23,7 @@ export async function POST(request: Request, { params }: Params) {
       bodyText: source.bodyText,
       attachmentName: source.attachmentName,
       attachmentPath: source.attachmentPath,
+      attachmentContent: source.attachmentContent,
       recipients: failedRecipients,
       parentBatchId: source.batchId,
       type: "retry",

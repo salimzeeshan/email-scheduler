@@ -23,7 +23,13 @@ export async function POST(request: Request) {
     fromName: String(form.get("fromName") || process.env.FROM_NAME || ""),
     bodyHtml: renderPersonalizedBody(bodyHtml, to),
     bodyText: `Hey,\n\n${htmlToText(bodyHtml)}`,
-    attachment: attachment.attachmentPath ? { name: attachment.attachmentName || "attachment", path: attachment.attachmentPath } : null,
+    attachment: attachment.attachmentName
+      ? {
+          name: attachment.attachmentName,
+          content: attachment.attachmentContent,
+          path: attachment.attachmentPath,
+        }
+      : null,
   });
   return NextResponse.json({ ok: true });
 }

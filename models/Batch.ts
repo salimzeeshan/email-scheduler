@@ -22,6 +22,7 @@ const BatchSchema = new Schema(
     bodyText: { type: String, required: true },
     attachmentName: String,
     attachmentPath: String,
+    attachmentContent: Buffer,
     recipientCount: { type: Number, default: 0 },
     sentCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
