@@ -27,6 +27,7 @@ const BatchSchema = new Schema(
     sentCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
     skippedCount: { type: Number, default: 0 },
+    intervalSeconds: { type: Number, default: 10 },
     status: {
       type: String,
       enum: ["scheduled", "sending", "completed", "failed", "cancelled"],

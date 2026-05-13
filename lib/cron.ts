@@ -32,14 +32,34 @@ export function cancelJob(batchId: string) {
   }
 }
 
+export async function reconcileScheduledJobs() {
+  await connectDb();
+  const now = new Date();
+  const scheduled = await Batch.find({ status: "scheduled" })
+    .select("batchId scheduledTime intervalSeconds")
+    .lean<{ batchId: string; scheduledTime?: Date; intervalSeconds?: number }[]>();
+
+  await Promise.all(
+    scheduled.map(async (batch) => {
+      const scheduledTime = batch.scheduledTime ? new Date(batch.scheduledTime) : null;
+      if (!scheduledTime) return;
+      const intervalSeconds = batch.intervalSeconds ?? 10;
+      if (scheduledTime <= now) {
+        cancelJob(batch.batchId);
+        await runBatch(batch.batchId, intervalSeconds);
+        return;
+      }
+      if (!jobs.has(batch.batchId)) {
+        registerJob(batch.batchId, scheduledTime, intervalSeconds);
+      }
+    }),
+  );
+}
+
 export async function initializeCron() {
   if (initialized) return;
+  await reconcileScheduledJobs();
   initialized = true;
-  await connectDb();
-  const pending = await Batch.find({ status: "scheduled", scheduledTime: { $gte: new Date() } })
-    .select("batchId scheduledTime")
-    .lean<{ batchId: string; scheduledTime: Date }[]>();
-  pending.forEach((batch) => registerJob(batch.batchId, new Date(batch.scheduledTime)));
   startKeepAlive();
 }
 

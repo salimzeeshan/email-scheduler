@@ -11,8 +11,8 @@ export async function POST(request: Request) {
   const bodyHtml = String(form.get("bodyHtml") || "");
   const attachmentFile = form.get("attachment") as File | null;
 
-  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml) || !attachmentFile || attachmentFile.size === 0) {
-    return NextResponse.json({ error: "Subject, content, and attachment are required" }, { status: 400 });
+  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml)) {
+    return NextResponse.json({ error: "Subject and content are required" }, { status: 400 });
   }
 
   const attachment = await saveTempAttachment(attachmentFile);

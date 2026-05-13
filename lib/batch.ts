@@ -62,6 +62,7 @@ export async function createBatch(payload: BatchPayload, status: "scheduled" | "
     attachmentContent: payload.attachmentContent,
     recipientCount: filtered.recipients.length,
     skippedCount: filtered.skipped.length,
+    intervalSeconds: payload.intervalSeconds ?? 10,
     status,
     scheduledTime: payload.scheduledTime,
     parentBatchId: payload.parentBatchId,

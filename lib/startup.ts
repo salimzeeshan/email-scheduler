@@ -1,9 +1,18 @@
 import { initializeCron } from "@/lib/cron";
 
 let started = false;
+let startupPromise: Promise<void> | null = null;
 
 export async function ensureStartup() {
   if (started) return;
-  started = true;
-  await initializeCron();
+  if (!startupPromise) {
+    startupPromise = initializeCron()
+      .then(() => {
+        started = true;
+      })
+      .finally(() => {
+        startupPromise = null;
+      });
+  }
+  await startupPromise;
 }

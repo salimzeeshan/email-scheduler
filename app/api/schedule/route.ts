@@ -14,8 +14,8 @@ export async function POST(request: Request) {
   const scheduled = parseScheduleDate(String(form.get("scheduledTime") || ""));
   const attachmentFile = form.get("attachment") as File | null;
 
-  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml) || !attachmentFile || attachmentFile.size === 0 || parsedRecipients.valid.length === 0) {
-    return NextResponse.json({ error: "Subject, content, attachment, and recipients are required" }, { status: 400 });
+  if (!subject.trim() || !hasMeaningfulHtml(bodyHtml) || parsedRecipients.valid.length === 0) {
+    return NextResponse.json({ error: "Subject, content, and recipients are required" }, { status: 400 });
   }
 
   if (!scheduled || scheduled <= new Date()) {
