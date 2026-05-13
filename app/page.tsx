@@ -112,7 +112,7 @@ export default function DashboardPage() {
 
       {selected ? (
         <div className="fixed inset-0 z-20 bg-black/20" onClick={() => setSelected(null)}>
-          <aside className="ml-auto h-full w-full max-w-xl overflow-y-auto bg-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <aside className="ml-auto h-full w-full overflow-y-auto bg-card p-6 shadow-xl lg:w-1/2" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="truncate font-semibold">{selected.subject}</h2>
@@ -162,7 +162,7 @@ export default function DashboardPage() {
                       <tr key={`${row.email}-${index}`} className="border-t">
                         <Td>{row.email}</Td>
                         <Td>{row.status}</Td>
-                        <Td>{formatDateTime(row.timestamp)}</Td>
+                        <Td className="whitespace-nowrap">{formatDateTime(row.timestamp)}</Td>
                         <Td>{row.error || ""}</Td>
                       </tr>
                     ))}

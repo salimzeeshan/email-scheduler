@@ -17,6 +17,7 @@ import { greetingName, parseRecipients, renderPersonalizedBody } from "@/lib/uti
 
 type Template = { _id: string; name: string; subject: string; fromName?: string; bodyHtml: string };
 type Batch = { subject: string; fromName?: string; bodyHtml: string; recipients?: string[] };
+type PendingAction = { actionName: "send" | "schedule"; url: string; extra?: Record<string, string> };
 
 export default function ComposePage() {
   return (
@@ -39,6 +40,7 @@ function ComposeContent() {
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [excluded, setExcluded] = useState(0);
   const [message, setMessage] = useState("");
+  const [pendingNoAttachmentAction, setPendingNoAttachmentAction] = useState<PendingAction | null>(null);
   const [busyAction, setBusyAction] = useState<"template" | "test" | "send" | "schedule" | null>(null);
 
   const editor = useEditor({
@@ -117,14 +119,13 @@ function ComposeContent() {
     setRecipientsText(cleanRecipientText(value));
   }
 
-  async function action(actionName: "test" | "send" | "schedule", url: string, extra?: Record<string, string>) {
+  async function action(actionName: "test" | "send" | "schedule", url: string, extra?: Record<string, string>, skipAttachmentWarning = false) {
     if (busyAction) return;
     const requiresRecipients = actionName !== "test";
     const missing = [
       !subject.trim() ? "subject line" : "",
       !hasContent ? "content" : "",
       requiresRecipients && parsed.valid.length === 0 ? "recipient" : "",
-      !attachment ? "attachment" : "",
       url === "/api/schedule" && !scheduledDate ? "schedule date" : "",
       url === "/api/schedule" && !scheduledClock ? "schedule time" : "",
     ].filter(Boolean);
@@ -133,6 +134,12 @@ function ComposeContent() {
       setMessage(`${formatMissingFields(missing)} ${missing.length === 1 ? "is" : "are"} required.`);
       return;
     }
+
+    if ((actionName === "send" || actionName === "schedule") && !attachment && !skipAttachmentWarning) {
+      setPendingNoAttachmentAction({ actionName, url, extra });
+      return;
+    }
+
     setBusyAction(actionName);
     setMessage("Working...");
     try {
@@ -224,7 +231,7 @@ function ComposeContent() {
               </Field>
               <div className="grid gap-4 md:grid-cols-3">
                 <Field label=".txt upload"><Input type="file" accept=".txt" onChange={async (e) => filterRecipientList(`${recipientsText}\n${await e.target.files?.[0]?.text()}`)} /></Field>
-                <Field label="Attachment *"><Input key={attachmentInputKey} required type="file" accept=".pdf,.docx" onChange={(e) => setAttachment(e.target.files?.[0] || null)} /></Field>
+                <Field label="Attachment"><Input key={attachmentInputKey} type="file" accept=".pdf,.docx" onChange={(e) => setAttachment(e.target.files?.[0] || null)} /></Field>
                 <Field label="Send interval"><Input type="number" min={0} value={intervalSeconds} onChange={(e) => setIntervalSeconds(Number(e.target.value))} /></Field>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -253,6 +260,39 @@ function ComposeContent() {
           </CardContent>
         </Card>
       </div>
+      {pendingNoAttachmentAction ? (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/45 p-4" role="presentation" onClick={() => setPendingNoAttachmentAction(null)}>
+          <div
+            className="w-full max-w-md rounded-md border bg-card p-5 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attachment-warning-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="attachment-warning-title" className="text-base font-semibold">
+              {pendingNoAttachmentAction.actionName === "send" ? "Send without attachment?" : "Schedule without attachment?"}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This batch does not include an attachment. You can continue, or go back and attach a PDF or DOCX first.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setPendingNoAttachmentAction(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const pending = pendingNoAttachmentAction;
+                  setPendingNoAttachmentAction(null);
+                  void action(pending.actionName, pending.url, pending.extra, true);
+                }}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageShell>
   );
 }
