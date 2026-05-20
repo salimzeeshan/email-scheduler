@@ -51,17 +51,33 @@ export async function saveRefreshToken(code: string) {
 }
 
 async function getRefreshToken() {
-  if (process.env.GMAIL_REFRESH_TOKEN) return process.env.GMAIL_REFRESH_TOKEN;
   await connectDb();
   const setting = await Setting.findOne({ key: "gmail_refresh_token" }).lean<{ value: string }>();
-  if (!setting?.value) throw new Error("Gmail refresh token is not configured");
-  return setting.value;
+  if (setting?.value) return setting.value;
+  if (process.env.GMAIL_REFRESH_TOKEN) return process.env.GMAIL_REFRESH_TOKEN;
+  throw new Error("Gmail refresh token is not configured");
 }
 
 async function gmailClient() {
   const client = oauthClient();
   client.setCredentials({ refresh_token: await getRefreshToken() });
   return google.gmail({ version: "v1", auth: client });
+}
+
+function gmailErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) return "Unknown Gmail send error";
+
+  const details = error as Error & {
+    response?: { data?: { error?: string; error_description?: string } };
+  };
+  const googleError = details.response?.data?.error;
+  const googleDescription = details.response?.data?.error_description;
+
+  if (googleError === "invalid_grant" || error.message.includes("invalid_grant")) {
+    return "Gmail authorization expired or was revoked. Reconnect Gmail from the setup page, then try sending again.";
+  }
+
+  return googleDescription || error.message;
 }
 
 function encodeHeader(value: string) {
@@ -134,9 +150,13 @@ async function buildRawEmail(input: SendEmailInput) {
 }
 
 export async function sendEmail(input: SendEmailInput) {
-  const gmail = await gmailClient();
-  const raw = await buildRawEmail(input);
-  return gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+  try {
+    const gmail = await gmailClient();
+    const raw = await buildRawEmail(input);
+    return await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+  } catch (error) {
+    throw new Error(gmailErrorMessage(error));
+  }
 }
 
 export async function sendPersonalizedEmail(input: Omit<SendEmailInput, "bodyHtml"> & { bodyHtml: string }) {
