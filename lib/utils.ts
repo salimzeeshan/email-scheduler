@@ -28,6 +28,7 @@ const teamWords = new Set([
   "admin",
   "noreply",
   "no-reply",
+  "career",
 ]);
 
 export function greetingName(email: string) {
@@ -96,7 +97,9 @@ export function parseScheduleDate(value: string) {
   const isoDate = new Date(trimmed);
   if (trimmed && !Number.isNaN(isoDate.getTime())) return isoDate;
 
-  const match = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const match = trimmed.match(
+    /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i,
+  );
   if (!match) return null;
   const [, dd, mm, yyyy, hh, min, meridiem] = match;
   let hour = Number(hh);
