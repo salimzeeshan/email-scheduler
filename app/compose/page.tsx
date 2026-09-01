@@ -202,6 +202,11 @@ function ComposeContent() {
       return;
     }
 
+    if ((actionName === "send" || actionName === "schedule") && subject.trim() === defaultSubject) {
+      setMessage({ text: "Update the subject line before sending or scheduling.", tone: "error" });
+      return;
+    }
+
     if ((actionName === "send" || actionName === "schedule") && !attachment && !skipAttachmentWarning) {
       setPendingNoAttachmentAction({ actionName, url, extra });
       return;

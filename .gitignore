@@ -1,9 +1,12 @@
 # Dependencies
 node_modules/
+.pnp
+.pnp.*
 
 # Next.js
 .next/
 out/
+next-env.d.ts
 
 # Production
 build/
@@ -11,6 +14,10 @@ dist/
 
 # Environment files
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env*.local
 
 # Logs
@@ -18,15 +25,27 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
 
 # TypeScript
 *.tsbuildinfo
-next-env.d.ts
+
+# Deployment and tool caches
+.vercel/
+.netlify/
+.turbo/
+.cache/
+.parcel-cache/
 
 # OS and editor files
 .DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
 .idea/
 .vscode/
+*.swp
+*.swo
 
 # Test and coverage output
 coverage/

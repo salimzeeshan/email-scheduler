@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, LoaderCircle, RefreshCw, XCircle } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,40 +31,62 @@ type Batch = {
   recipients?: string[];
   logs: Log[];
 };
+type Summary = { total: number; scheduled: number; completed: number; failed: number };
+type BatchesResponse = {
+  batches: Batch[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  summary: Summary;
+};
+
+const pageSize = 10;
+const emptySummary: Summary = { total: 0, scheduled: 0, completed: 0, failed: 0 };
 
 export default function DashboardPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [selected, setSelected] = useState<Batch | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [summary, setSummary] = useState<Summary>(emptySummary);
+  const [loading, setLoading] = useState(true);
 
-  async function load() {
-    setBatches(await fetch("/api/batches").then((res) => res.json()));
+  async function load(currentPage = page) {
+    setLoading(true);
+    try {
+      const result: BatchesResponse = await fetch(`/api/batches?page=${currentPage}&limit=${pageSize}`).then((res) => res.json());
+      setBatches(result.batches);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
+      setSummary(result.summary);
+      setSelected((current) => {
+        if (!current) return current;
+        return result.batches.find((batch) => batch.batchId === current.batchId) || current;
+      });
+      if (currentPage > result.totalPages) setPage(result.totalPages);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    load();
-    const timer = setInterval(load, 5000);
+    load(page);
+    const timer = setInterval(() => load(page), 5000);
     return () => clearInterval(timer);
-  }, []);
-
-  const summary = useMemo(
-    () => ({
-      total: batches.length,
-      scheduled: batches.filter((b) => b.status === "scheduled").length,
-      completed: batches.filter((b) => b.status === "completed").length,
-      failed: batches.filter((b) => b.status === "failed").length,
-    }),
-    [batches],
-  );
+  }, [page]);
 
   async function cancel(batchId: string) {
     await fetch(`/api/batches/${batchId}`, { method: "DELETE" });
     setSelected((current) => (current?.batchId === batchId ? { ...current, status: "cancelled" } : current));
-    await load();
+    await load(page);
   }
 
   async function retry(batchId: string) {
     await fetch(`/api/batches/${batchId}/retry`, { method: "POST", body: JSON.stringify({ intervalSeconds: 10 }) });
-    await load();
+    setPage(1);
+    await load(1);
   }
 
   return (
@@ -77,12 +99,31 @@ export default function DashboardPage() {
       </div>
 
       <Card className="mt-6 overflow-hidden">
-        <CardHeader><CardTitle>Batches</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>Batches</CardTitle>
+            {loading ? (
+              <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                Loading
+              </span>
+            ) : null}
+          </div>
+        </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <Table>
             <thead><tr><Th>Subject</Th><Th>Status</Th><Th>Recipients</Th><Th>Sent</Th><Th>Failed</Th><Th>Scheduled</Th><Th>Created</Th><Th>Actions</Th></tr></thead>
             <tbody>
-              {batches.map((batch) => (
+              {loading && batches.length === 0 ? (
+                <tr className="border-t">
+                  <Td colSpan={8} className="py-8 text-center text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      Loading batches
+                    </span>
+                  </Td>
+                </tr>
+              ) : batches.length > 0 ? batches.map((batch) => (
                 <tr key={batch.batchId} className="cursor-pointer border-t hover:bg-muted/60" onClick={() => setSelected(batch)}>
                   <Td className="max-w-80 truncate">{batch.subject}</Td>
                   <Td><Badge variant={batch.type === "retry" ? "retry" : batch.status}>{batch.type === "retry" ? "retry" : batch.status}</Badge></Td>
@@ -104,9 +145,25 @@ export default function DashboardPage() {
                     </div>
                   </Td>
                 </tr>
-              ))}
+              )) : (
+                <tr className="border-t">
+                  <Td colSpan={8} className="py-8 text-center text-muted-foreground">No batches yet.</Td>
+                </tr>
+              )}
             </tbody>
           </Table>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+            <span>{paginationRange(page, pageSize, total)}</span>
+            <div className="flex items-center gap-2">
+              <Button type="button" size="icon" variant="outline" disabled={loading || page <= 1} onClick={() => setPage((current) => Math.max(current - 1, 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-24 text-center">Page {page} of {totalPages}</span>
+              <Button type="button" size="icon" variant="outline" disabled={loading || page >= totalPages} onClick={() => setPage((current) => Math.min(current + 1, totalPages))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -188,6 +245,13 @@ function Detail({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="mt-1 break-words">{value}</div>
     </div>
   );
+}
+
+function paginationRange(page: number, limit: number, total: number) {
+  if (total === 0) return "Showing 0 batches";
+  const start = (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+  return `Showing ${start}-${end} of ${total} batches`;
 }
 
 function recipientRows(batch: Batch): Log[] {
