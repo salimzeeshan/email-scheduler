@@ -67,6 +67,7 @@
 .ProseMirror {
   min-height: 280px;
   outline: none;
+  line-height: 1.6;
 }
 
 .ProseMirror ul,
@@ -81,6 +82,12 @@
   padding-left: 1.5rem;
 }
 
+.ProseMirror p,
 .preview-body p {
   margin-bottom: 0.75rem;
+}
+
+.ProseMirror p:last-child,
+.preview-body p:last-child {
+  margin-bottom: 0;
 }
