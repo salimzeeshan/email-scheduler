@@ -29,6 +29,7 @@ type Draft = {
   scheduledClock: string;
 };
 type Message = { text: string; tone: "neutral" | "error" };
+type ValidationErrors = Partial<Record<"templateName" | "subject" | "content" | "recipients" | "scheduledDate" | "scheduledClock", string>>;
 
 const draftStorageKey = "email-scheduler-compose-draft";
 const defaultSubject = "Application for [Role]";
@@ -58,6 +59,7 @@ function ComposeContent() {
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [excluded, setExcluded] = useState(0);
   const [message, setMessage] = useState<Message | null>(null);
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const [pendingNoAttachmentAction, setPendingNoAttachmentAction] = useState<PendingAction | null>(null);
   const [busyAction, setBusyAction] = useState<"template" | "test" | "send" | "schedule" | null>(null);
 
@@ -65,7 +67,10 @@ function ComposeContent() {
     extensions: [StarterKit, Underline, Link.configure({ openOnClick: false })],
     content: bodyHtml,
     immediatelyRender: false,
-    onUpdate: ({ editor }) => setBodyHtml(editor.getHTML()),
+    onUpdate: ({ editor }) => {
+      setBodyHtml(editor.getHTML());
+      clearValidationError("content");
+    },
   });
 
   const parsed = useMemo(() => parseRecipients(recipientsText), [recipientsText]);
@@ -172,14 +177,17 @@ function ComposeContent() {
     editor?.commands.setContent(defaultBodyHtml);
     localStorage.removeItem(draftStorageKey);
     setMessage(null);
+    setValidationErrors({});
   }
 
   function updateScheduledDate(value: string) {
     const weekdayValue = weekdayDateValue(value);
     setScheduledDate(weekdayValue);
     if (weekdayValue !== value) {
-      setMessage({ text: "Schedule date moved to the next weekday.", tone: "error" });
+      setValidationErrors((current) => ({ ...current, scheduledDate: "Schedule date moved to the next weekday." }));
+      return;
     }
+    clearValidationError("scheduledDate");
   }
 
   function filterRecipientList(value = recipientsText) {
@@ -189,24 +197,23 @@ function ComposeContent() {
   async function action(actionName: "test" | "send" | "schedule", url: string, extra?: Record<string, string>, skipAttachmentWarning = false) {
     if (busyAction) return;
     const requiresRecipients = actionName !== "test";
-    const missing = [
-      !subject.trim() ? "subject line" : "",
-      !hasContent ? "content" : "",
-      requiresRecipients && parsed.valid.length === 0 ? "recipient" : "",
-      url === "/api/schedule" && !scheduledDate ? "schedule date" : "",
-      url === "/api/schedule" && !scheduledClock ? "schedule time" : "",
-    ].filter(Boolean);
-
-    if (missing.length > 0) {
-      setMessage({ text: `${formatMissingFields(missing)} ${missing.length === 1 ? "is" : "are"} required.`, tone: "error" });
-      return;
-    }
-
+    const errors: ValidationErrors = {};
+    if (!subject.trim()) errors.subject = "Subject line is required.";
+    if (!hasContent) errors.content = "Email content is required.";
+    if (requiresRecipients && parsed.valid.length === 0) errors.recipients = "At least one recipient is required.";
+    if (url === "/api/schedule" && !scheduledDate) errors.scheduledDate = "Schedule date is required.";
+    if (url === "/api/schedule" && !scheduledClock) errors.scheduledClock = "Schedule time is required.";
     if ((actionName === "send" || actionName === "schedule") && subject.trim() === defaultSubject) {
-      setMessage({ text: "Update the subject line before sending or scheduling.", tone: "error" });
+      errors.subject = "Update the subject line before sending or scheduling.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      setMessage(null);
       return;
     }
 
+    setValidationErrors({});
     if ((actionName === "send" || actionName === "schedule") && !attachment && !skipAttachmentWarning) {
       setPendingNoAttachmentAction({ actionName, url, extra });
       return;
@@ -229,14 +236,22 @@ function ComposeContent() {
 
   async function saveTemplate() {
     if (busyAction) return;
+    const errors: ValidationErrors = {};
     if (!templateName) {
-      setMessage({ text: "Add a template name first.", tone: "error" });
-      return;
+      errors.templateName = "Template name is required.";
     }
     if (!subject.trim() || !hasContent) {
-      setMessage({ text: "Subject line and content are required to save a template.", tone: "error" });
+      if (!subject.trim()) errors.subject = "Subject line is required.";
+      if (!hasContent) errors.content = "Email content is required.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      setMessage(null);
       return;
     }
+
+    setValidationErrors({});
     setBusyAction("template");
     try {
       await fetch("/api/templates", {
@@ -255,6 +270,15 @@ function ComposeContent() {
     if (href) editor?.chain().focus().setLink({ href }).run();
   }
 
+  function clearValidationError(field: keyof ValidationErrors) {
+    setValidationErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
   return (
     <PageShell title="Compose">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -263,8 +287,12 @@ function ComposeContent() {
             <CardHeader><CardTitle>Message</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Template name"><Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} /></Field>
-                <Field label="Subject line *"><Input required value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+                <Field label="Template name" error={validationErrors.templateName}>
+                  <Input value={templateName} onChange={(e) => { setTemplateName(e.target.value); clearValidationError("templateName"); }} />
+                </Field>
+                <Field label="Subject line *" error={validationErrors.subject}>
+                  <Input required value={subject} onChange={(e) => { setSubject(e.target.value); clearValidationError("subject"); }} />
+                </Field>
                 <Field label="From name"><Input value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="FROM_NAME" /></Field>
                 <Field label="Greeting prefix">
                   <Input value="Hey," readOnly />
@@ -282,18 +310,19 @@ function ComposeContent() {
                 </div>
                 <EditorContent editor={editor} className="p-4" />
               </div>
+              {validationErrors.content ? <p className="text-sm text-red-500 dark:text-red-300">{validationErrors.content}</p> : null}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader><CardTitle>Recipients and delivery</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <Field label="Recipient list *">
+              <Field label="Recipient list *" error={validationErrors.recipients}>
                 <Textarea
                   required
                   value={recipientsText}
                   onBlur={() => filterRecipientList()}
-                  onChange={(e) => setRecipientsText(e.target.value)}
+                  onChange={(e) => { setRecipientsText(e.target.value); clearValidationError("recipients"); }}
                   placeholder="one email per line"
                 />
                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -306,8 +335,10 @@ function ComposeContent() {
                 <Field label="Send interval"><Input type="number" min={0} value={intervalSeconds} onChange={(e) => setIntervalSeconds(Number(e.target.value))} /></Field>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Schedule date"><Input type="date" value={scheduledDate} onChange={(e) => updateScheduledDate(e.target.value)} /></Field>
-                <Field label="Schedule time"><Input type="time" value={scheduledClock} onChange={(e) => setScheduledClock(e.target.value)} /></Field>
+                <Field label="Schedule date" error={validationErrors.scheduledDate}><Input type="date" value={scheduledDate} onChange={(e) => updateScheduledDate(e.target.value)} /></Field>
+                <Field label="Schedule time" error={validationErrors.scheduledClock}>
+                  <Input type="time" value={scheduledClock} onChange={(e) => { setScheduledClock(e.target.value); clearValidationError("scheduledClock"); }} />
+                </Field>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="secondary" disabled={busyAction !== null} onClick={saveTemplate}>{busyAction === "template" ? "Saving..." : "Save template"}</Button>
@@ -316,7 +347,6 @@ function ComposeContent() {
                 <Button type="button" variant="outline" disabled={busyAction !== null} onClick={() => action("schedule", "/api/schedule", { scheduledTime: formatScheduleDateTime(scheduledDate, scheduledClock) })}>{busyAction === "schedule" ? "Scheduling..." : "Schedule"}</Button>
                 <Button type="button" variant="ghost" disabled={busyAction !== null} onClick={clearCampaignForm}><Trash2 className="h-4 w-4" />Clear</Button>
               </div>
-              {!hasContent ? <p className="text-xs text-muted-foreground">Email content is required.</p> : null}
               {message ? <p className={message.tone === "error" ? "text-sm text-red-500 dark:text-red-300" : "text-sm text-muted-foreground"}>{message.text}</p> : null}
             </CardContent>
           </Card>
@@ -367,16 +397,6 @@ function ComposeContent() {
       ) : null}
     </PageShell>
   );
-}
-
-function formatMissingFields(fields: string[]) {
-  if (fields.length === 1) return fields[0][0].toUpperCase() + fields[0].slice(1);
-  if (fields.length === 2) return `${capitalize(fields[0])} and ${fields[1]}`;
-  return `${capitalize(fields.slice(0, -1).join(", "))}, and ${fields[fields.length - 1]}`;
-}
-
-function capitalize(value: string) {
-  return value[0].toUpperCase() + value.slice(1);
 }
 
 function formatScheduleDateTime(date: string, time: string) {
@@ -456,6 +476,12 @@ function countDuplicateRecipients(value: string) {
   return duplicates;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
+function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+      {error ? <p className="text-sm text-red-500 dark:text-red-300">{error}</p> : null}
+    </div>
+  );
 }
