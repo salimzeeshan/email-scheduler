@@ -22,6 +22,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A future scheduled time is required" }, { status: 400 });
   }
 
+  if (scheduled.getDay() === 0 || scheduled.getDay() === 6) {
+    return NextResponse.json({ error: "Schedule date must be a weekday" }, { status: 400 });
+  }
+
   const attachment = await saveTempAttachment(attachmentFile);
   const batch = await createBatch(
     {

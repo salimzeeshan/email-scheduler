@@ -6,7 +6,7 @@ import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Bold, Italic, LinkIcon, List, ListOrdered, Underline as UnderlineIcon } from "lucide-react";
+import { Bold, Italic, LinkIcon, List, ListOrdered, Trash2, Underline as UnderlineIcon } from "lucide-react";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,22 @@ import { greetingName, parseRecipients, renderPersonalizedBody } from "@/lib/uti
 type Template = { _id: string; name: string; subject: string; fromName?: string; bodyHtml: string };
 type Batch = { subject: string; fromName?: string; bodyHtml: string; recipients?: string[] };
 type PendingAction = { actionName: "send" | "schedule"; url: string; extra?: Record<string, string> };
+type Draft = {
+  templateName: string;
+  subject: string;
+  fromName: string;
+  bodyHtml: string;
+  recipientsText: string;
+  intervalSeconds: number;
+  scheduledDate: string;
+  scheduledClock: string;
+};
+type Message = { text: string; tone: "neutral" | "error" };
+
+const draftStorageKey = "email-scheduler-compose-draft";
+const defaultSubject = "Application for [Role]";
+const defaultScheduleClock = "09:45";
+const defaultBodyHtml = "<p></p>";
 
 export default function ComposePage() {
   return (
@@ -29,30 +45,33 @@ export default function ComposePage() {
 
 function ComposeContent() {
   const search = useSearchParams();
+  const [draftReady, setDraftReady] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [subject, setSubject] = useState("");
+  const [subject, setSubject] = useState(defaultSubject);
   const [fromName, setFromName] = useState("");
+  const [bodyHtml, setBodyHtml] = useState(defaultBodyHtml);
   const [recipientsText, setRecipientsText] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState(10);
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [scheduledClock, setScheduledClock] = useState("09:45");
+  const [scheduledDate, setScheduledDate] = useState(() => defaultScheduleDate());
+  const [scheduledClock, setScheduledClock] = useState(defaultScheduleClock);
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [excluded, setExcluded] = useState(0);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<Message | null>(null);
   const [pendingNoAttachmentAction, setPendingNoAttachmentAction] = useState<PendingAction | null>(null);
   const [busyAction, setBusyAction] = useState<"template" | "test" | "send" | "schedule" | null>(null);
 
   const editor = useEditor({
     extensions: [StarterKit, Underline, Link.configure({ openOnClick: false })],
-    content: "<p></p>",
+    content: bodyHtml,
     immediatelyRender: false,
+    onUpdate: ({ editor }) => setBodyHtml(editor.getHTML()),
   });
 
   const parsed = useMemo(() => parseRecipients(recipientsText), [recipientsText]);
   const duplicateCount = useMemo(() => countDuplicateRecipients(recipientsText), [recipientsText]);
   const firstRecipient = parsed.valid[0] || "alex@example.com";
-  const previewHtml = renderPersonalizedBody(editor?.getHTML() || "", firstRecipient);
+  const previewHtml = renderPersonalizedBody(bodyHtml, firstRecipient);
   const hasContent = (editor?.getText() || "").trim().length > 0;
 
   useEffect(() => {
@@ -66,8 +85,11 @@ function ComposeContent() {
           setTemplateName("");
           setSubject(template.subject);
           setFromName(template.fromName || "");
+          setBodyHtml(template.bodyHtml);
           editor?.commands.setContent(template.bodyHtml);
         }
+        setDraftReady(true);
+        return;
       }
       if (duplicateId) {
         const batch: Batch = await fetch(`/api/batches/${duplicateId}`).then((r) => r.json());
@@ -75,11 +97,45 @@ function ComposeContent() {
         setSubject(batch.subject);
         setFromName(batch.fromName || "");
         setRecipientsText((batch.recipients || []).join("\n"));
+        setBodyHtml(batch.bodyHtml);
         editor?.commands.setContent(batch.bodyHtml);
+        setScheduledDate(defaultScheduleDate());
+        setScheduledClock(defaultScheduleClock);
+        setDraftReady(true);
+        return;
       }
+
+      const savedDraft = readSavedDraft();
+      if (savedDraft) {
+        setTemplateName(savedDraft.templateName);
+        setSubject(savedDraft.subject);
+        setFromName(savedDraft.fromName);
+        setBodyHtml(savedDraft.bodyHtml);
+        setRecipientsText(savedDraft.recipientsText);
+        setIntervalSeconds(savedDraft.intervalSeconds);
+        setScheduledDate(weekdayDateValue(savedDraft.scheduledDate || defaultScheduleDate()));
+        setScheduledClock(savedDraft.scheduledClock || defaultScheduleClock);
+        editor?.commands.setContent(savedDraft.bodyHtml || defaultBodyHtml);
+      }
+      setDraftReady(true);
     }
     if (editor) loadDraft();
   }, [editor, search]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const draft: Draft = {
+      templateName,
+      subject,
+      fromName,
+      bodyHtml,
+      recipientsText,
+      intervalSeconds,
+      scheduledDate,
+      scheduledClock,
+    };
+    localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  }, [bodyHtml, draftReady, fromName, intervalSeconds, recipientsText, scheduledClock, scheduledDate, subject, templateName]);
 
   useEffect(() => {
     async function checkBlocklist() {
@@ -104,15 +160,26 @@ function ComposeContent() {
 
   function clearCampaignForm() {
     setTemplateName("");
-    setSubject("");
+    setSubject(defaultSubject);
     setFromName("");
+    setBodyHtml(defaultBodyHtml);
     setRecipientsText("");
     setIntervalSeconds(10);
-    setScheduledDate("");
-    setScheduledClock("09:45");
+    setScheduledDate(defaultScheduleDate());
+    setScheduledClock(defaultScheduleClock);
     setAttachment(null);
     setAttachmentInputKey((key) => key + 1);
-    editor?.commands.setContent("<p></p>");
+    editor?.commands.setContent(defaultBodyHtml);
+    localStorage.removeItem(draftStorageKey);
+    setMessage(null);
+  }
+
+  function updateScheduledDate(value: string) {
+    const weekdayValue = weekdayDateValue(value);
+    setScheduledDate(weekdayValue);
+    if (weekdayValue !== value) {
+      setMessage({ text: "Schedule date moved to the next weekday.", tone: "error" });
+    }
   }
 
   function filterRecipientList(value = recipientsText) {
@@ -131,7 +198,7 @@ function ComposeContent() {
     ].filter(Boolean);
 
     if (missing.length > 0) {
-      setMessage(`${formatMissingFields(missing)} ${missing.length === 1 ? "is" : "are"} required.`);
+      setMessage({ text: `${formatMissingFields(missing)} ${missing.length === 1 ? "is" : "are"} required.`, tone: "error" });
       return;
     }
 
@@ -141,16 +208,15 @@ function ComposeContent() {
     }
 
     setBusyAction(actionName);
-    setMessage("Working...");
+    setMessage({ text: "Working...", tone: "neutral" });
     try {
       const res = await fetch(url, { method: "POST", body: appendForm(extra) });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage(json.error || "Request failed");
+        setMessage({ text: json.error || "Request failed", tone: "error" });
         return;
       }
-      setMessage(`Done. ${json.batchId ? `Batch ${json.batchId}` : ""}`);
-      if (actionName === "send" || actionName === "schedule") clearCampaignForm();
+      setMessage({ text: `Done. ${json.batchId ? `Batch ${json.batchId}` : ""}`, tone: "neutral" });
     } finally {
       setBusyAction(null);
     }
@@ -159,11 +225,11 @@ function ComposeContent() {
   async function saveTemplate() {
     if (busyAction) return;
     if (!templateName) {
-      setMessage("Add a template name first.");
+      setMessage({ text: "Add a template name first.", tone: "error" });
       return;
     }
     if (!subject.trim() || !hasContent) {
-      setMessage("Subject line and content are required to save a template.");
+      setMessage({ text: "Subject line and content are required to save a template.", tone: "error" });
       return;
     }
     setBusyAction("template");
@@ -173,7 +239,7 @@ function ComposeContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: templateName, subject, fromName, bodyHtml: editor?.getHTML() || "" }),
       });
-      setMessage("Template saved.");
+      setMessage({ text: "Template saved.", tone: "neutral" });
     } finally {
       setBusyAction(null);
     }
@@ -235,7 +301,7 @@ function ComposeContent() {
                 <Field label="Send interval"><Input type="number" min={0} value={intervalSeconds} onChange={(e) => setIntervalSeconds(Number(e.target.value))} /></Field>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Schedule date"><Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} /></Field>
+                <Field label="Schedule date"><Input type="date" value={scheduledDate} onChange={(e) => updateScheduledDate(e.target.value)} /></Field>
                 <Field label="Schedule time"><Input type="time" value={scheduledClock} onChange={(e) => setScheduledClock(e.target.value)} /></Field>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -243,9 +309,10 @@ function ComposeContent() {
                 <Button type="button" variant="outline" disabled={busyAction !== null} onClick={() => action("test", "/api/test-email")}>{busyAction === "test" ? "Sending..." : "Send test email"}</Button>
                 <Button type="button" disabled={busyAction !== null} onClick={() => action("send", "/api/send")}>{busyAction === "send" ? "Sending..." : "Send now"}</Button>
                 <Button type="button" variant="outline" disabled={busyAction !== null} onClick={() => action("schedule", "/api/schedule", { scheduledTime: formatScheduleDateTime(scheduledDate, scheduledClock) })}>{busyAction === "schedule" ? "Scheduling..." : "Schedule"}</Button>
+                <Button type="button" variant="ghost" disabled={busyAction !== null} onClick={clearCampaignForm}><Trash2 className="h-4 w-4" />Clear</Button>
               </div>
               {!hasContent ? <p className="text-xs text-muted-foreground">Email content is required.</p> : null}
-              {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+              {message ? <p className={message.tone === "error" ? "text-sm text-red-500 dark:text-red-300" : "text-sm text-muted-foreground"}>{message.text}</p> : null}
             </CardContent>
           </Card>
         </div>
@@ -312,6 +379,51 @@ function formatScheduleDateTime(date: string, time: string) {
   const [year, month, day] = date.split("-");
   const [hour, minute] = time.split(":");
   return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)).toISOString();
+}
+
+function defaultScheduleDate(now = new Date()) {
+  const [hour, minute] = defaultScheduleClock.split(":").map(Number);
+  const date = new Date(now);
+  const defaultTimeToday = new Date(now);
+  defaultTimeToday.setHours(hour, minute, 0, 0);
+
+  if (now > defaultTimeToday) {
+    date.setDate(date.getDate() + 1);
+  }
+
+  return dateValue(nextWeekday(date));
+}
+
+function weekdayDateValue(value: string) {
+  if (!value) return defaultScheduleDate();
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return defaultScheduleDate();
+  return dateValue(nextWeekday(new Date(year, month - 1, day)));
+}
+
+function nextWeekday(date: Date) {
+  const next = new Date(date);
+  while (next.getDay() === 0 || next.getDay() === 6) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+}
+
+function dateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function readSavedDraft(): Draft | null {
+  try {
+    const value = localStorage.getItem(draftStorageKey);
+    if (!value) return null;
+    return JSON.parse(value) as Draft;
+  } catch {
+    return null;
+  }
 }
 
 function cleanRecipientText(value: string) {

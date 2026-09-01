@@ -51,7 +51,7 @@ function LoginContent() {
               <Label htmlFor="password">Admin password</Label>
               <Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             </div>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            {error ? <p className="text-sm text-red-500 dark:text-red-300">{error}</p> : null}
             <Button className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign in"}
             </Button>
